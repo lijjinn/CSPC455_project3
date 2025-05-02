@@ -11,6 +11,7 @@ from string import ascii_uppercase
 import emoji
 import bcrypt  
 from datetime import datetime, timedelta
+import html
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "hjhjsdahhds"
@@ -18,6 +19,12 @@ app.config["UPLOAD_FOLDER"] = "uploads"
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 app.config["LOGS_FOLDER"] = "logs"
 os.makedirs(app.config["LOGS_FOLDER"], exist_ok=True)
+
+
+def sanitize_input(text):
+    if not text:
+        return ""
+    return html.escape(text.strip())
 
 # In-memory user store (username: {password: hashed})
 users = {}
@@ -70,8 +77,8 @@ MAX_ATTEMPTS = 3      # Maximum failed attempts before lockout
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
+        username = sanitize_input(request.form.get("username"))
+        password = sanitize_input(request.form.get("password"))
         if not username or not password:
             return render_template("register.html", error="Please fill out both fields.")
         if username in users:
@@ -85,8 +92,9 @@ def register():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
+        username = sanitize_input(request.form.get("username"))
+        password = sanitize_input(request.form.get("password"))
+
         # Check if the user is currently locked out
         if username in failed_attempts:
             lockout_info = failed_attempts[username]
@@ -205,7 +213,8 @@ def handle_message(data):
     user_message_times[current_user] = timestamps
 
     # Process the message if within limit
-    formatted_message = format_message(data["data"])
+    cleaned_message = sanitize_input(data.get("data", ""))
+    formatted_message = format_message(cleaned_message)
     content = {"name": current_user, "message": formatted_message}
     send(content, to=room)
     conversations[room].append(content)
@@ -213,6 +222,23 @@ def handle_message(data):
     log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {current_user}: {data['data']}"
     log_message(room, log_entry)
     print(f"{current_user} said: {data['data']} in DM with {partner}")
+
+
+    
+@socketio.on("typing")
+def handle_typing(data):
+    if "username" not in session or "current_partner" not in session:
+        return
+    current_user = session["username"]
+    partner = session["current_partner"]
+    room = get_dm_room(current_user, partner)
+
+    socketio.emit("typing_status", {
+        "user": current_user,
+        "typing": data["typing"]
+    }, to=room)
+
+
 
 
 
