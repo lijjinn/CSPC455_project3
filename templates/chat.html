@@ -99,12 +99,21 @@
       }
 
       function uploadFile() {
-          const fileInput = document.getElementById("file-input");
-          const file = fileInput.files[0];
-          if (!file) {
-              alert("Please select a file to upload.");
-              return;
-          }
+        const fileInput = document.getElementById("file-input");
+        const file = fileInput.files[0];
+        if (!file) {
+            alert("Please select a file to upload.");
+            return;
+        }
+    
+        const allowedExtensions = ['pdf', 'docx', 'png', 'jpg', 'jpeg', 'txt'];
+        const fileExtension = file.name.split('.').pop().toLowerCase();
+    
+        if (!allowedExtensions.includes(fileExtension)) {
+            alert("Invalid file type. Allowed: pdf, docx, png, jpg, jpeg, txt.");
+            return;
+        }
+    
           const formData = new FormData();
           formData.append("file", file);
           fetch('/upload', { method: "POST", body: formData })
