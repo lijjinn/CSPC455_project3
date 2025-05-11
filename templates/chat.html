@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat with {{ partner }}</title>
+    <style>
+      /* Presence bubble styling */
+      .status-bubble {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-left: 10px;
+        vertical-align: middle;
+      }
+      /* Chat layout */
+      .message-box { max-width: 600px; margin: auto; }
+      .messages {
+        border: 1px solid #ccc;
+        height: 300px;
+        overflow-y: auto;
+        padding: 10px;
+      }
+      .typing-status {
+        height: 1.2em; /* reserve space */
+        margin: 5px 10px;
+        font-style: italic;
+        color: gray;
+      }
+      .inputs {
+        margin-top: 10px;
+        padding: 0 10px;
+      }
+      .text { margin-bottom: 5px; }
+      .muted { font-size: 0.8em; color: gray; margin-left: 10px; }
+
+      /* Attachment list */
+      #attachment-list { margin-top: 5px; }
+      .attachment-item {
+        display: inline-block;
+        background: #f1f1f1;
+        padding: 2px 6px;
+        margin-right: 5px;
+        border-radius: 4px;
+        font-size: 0.9em;
+      }
+      .remove-attach {
+        cursor: pointer;
+        margin-left: 4px;
+        font-weight: bold;
+      }
+
+      button { cursor: pointer; }
+      input[type=text] { padding: 5px; }
+    </style>
+</head>
+<body>
+    <div class="message-box">
+        <h2>
+          Chat with {{ partner }}
+          <span id="partner-status" class="status-bubble"
+                style="background-color: {{ 'green' if partner in online_users else 'gray' }};">
+          </span>
+        </h2>
+
+        <div class="messages" id="messages">
+            <!-- {% for msg in messages %}
+                <div class="text">
+                    <strong>{{ msg.name }}</strong>: {{ msg.message|safe }}
+                    <span class="muted">{{ loop.index0 }}</span>
+                </div>
+            {% endfor %} -->
+            {% for msg in messages %}
+                <div class="text">
+                    <strong>{{ msg.name }}</strong>: {{ msg.message|safe }}
+                    <span class="muted">{{ msg.timestamp }}</span>
+                </div>
+            {% endfor %}
+        </div>
+
+        <!-- Typing indicator reserving space -->
+        <div id="status" class="typing-status"></div>
+
+        <div class="inputs">
+            <!-- Emoji picker -->
+            <span class="emoji-container">
+                <emoji-picker id="emoji-picker" style="display:none;"></emoji-picker>
+                <button type="button" onclick="toggleEmojiPicker()">😀</button>
+            </span>
+
+            <!-- Message input -->
+            <input type="text" placeholder="Message" id="message" style="width: 60%;" />
+
+            <!-- Choose File -->
+            <input type="file" id="file-input" multiple style="display:none" />
+            <button type="button" onclick="document.getElementById('file-input').click()">Choose File</button>
+
+            <!-- Send -->
+            <button type="button" id="send-btn" onclick="sendMessage()">Send</button>
+
+            <!-- Attachment list -->
+            <div id="attachment-list"></div>
+        </div>
+
+        <p style="text-align:center;"><a href="/">Back to Dashboard</a></p>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/emoji-picker-element"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+    <script>
+      const socket = io();
+      const messagesDiv = document.getElementById('messages');
+      const emojiPicker = document.getElementById('emoji-picker');
+      const messageInput = document.getElementById('message');
+      const statusDiv = document.getElementById('status');
+      const fileInput = document.getElementById('file-input');
+      const attachmentList = document.getElementById('attachment-list');
+      const partnerName = "{{ partner }}";
+      const statusBubble = document.getElementById('partner-status');
+
+      let typingTimeout;
+      let attachments = [];
+
+      // Emoji picker toggle
+      function toggleEmojiPicker() {
+        emojiPicker.style.display = emojiPicker.style.display === 'none' ? 'block' : 'none';
+      }
+      emojiPicker.addEventListener('emoji-click', e => {
+        messageInput.value += e.detail.unicode;
+      });
+
+      // Typing indicator events
+      messageInput.addEventListener('input', () => {
+        socket.emit('typing', { typing: messageInput.value.length > 0 });
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+          socket.emit('typing', { typing: false });
+        }, 1500);
+      });
+      socket.on('typing_status', data => {
+        statusDiv.textContent = data.typing ? `${data.user} is typing...` : '';
+      });
+
+      // Incoming messages
+      socket.on('message', data => {
+        appendMessage(data.name, data.message);
+        statusDiv.textContent = '';
+      });
+
+      // Presence updates
+      socket.on('status_update', data => {
+        if (data.user === partnerName) {
+          statusBubble.style.backgroundColor = data.online ? 'green' : 'gray';
+        }
+      });
+
+      // File attachments
+      fileInput.addEventListener('change', e => {
+        Array.from(e.target.files).forEach(file => attachments.push(file));
+        renderAttachments();
+        fileInput.value = '';
+      });
+      function renderAttachments() {
+        attachmentList.innerHTML = '';
+        attachments.forEach((file, i) => {
+          const span = document.createElement('span');
+          span.className = 'attachment-item';
+          span.textContent = file.name;
+          const x = document.createElement('span');
+          x.className = 'remove-attach';
+          x.textContent = '×';
+          x.onclick = () => { attachments.splice(i,1); renderAttachments(); };
+          span.appendChild(x);
+          attachmentList.appendChild(span);
+        });
+      }
+
+      // Send message + attachments
+      async function sendMessage() {
+        const text = messageInput.value.trim();
+        const parts = [];
+        if (text) parts.push(text);
+        if (attachments.length) {
+          const results = await Promise.all(attachments.map(file => {
+            const fd = new FormData(); fd.append('file', file);
+            return fetch('/upload', { method:'POST', body: fd }).then(r=>r.json());
+          }));
+          results.forEach(res => {
+            if (res.success) parts.push(`📎 <a href="${res.file_url}" target="_blank">${res.file_name}</a>`);
+          });
+        }
+        const combined = parts.join(' ');
+        if (combined) socket.emit('message', { data: combined });
+        messageInput.value = '';
+        attachments = []; renderAttachments();
+      }
+
+      function appendMessage(name,msg) {
+        const div = document.createElement('div'); div.className = 'text';
+        const ts = document.createElement('span'); ts.className='muted';
+        ts.textContent = new Date().toLocaleTimeString();
+        div.innerHTML = `<strong>${name}</strong>: ${msg} `;
+        div.appendChild(ts);
+        messagesDiv.appendChild(div);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      }
+    </script>
+</body>
+</html>

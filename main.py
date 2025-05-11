@@ -194,20 +194,6 @@ def chat(partner):
         online_users=list(online_users)
     )
 
-# @socketio.on("connect")
-# def on_connect(auth):
-#     if "username" not in session or "current_partner" not in session:
-#         return
-#     current_user = session["username"]
-#     partner = session["current_partner"]
-#     room = get_dm_room(current_user, partner)
-#     join_room(room)
-#     # send({"name": current_user, "message": "has entered the chat."}, to=room)
-#     print(f"{current_user} joined DM room {room}")
-
-#     if current_user not in online_users:
-#         online_users.add(current_user)
-#         socketio.emit("status_update", {"user": current_user, "online": True})
 
 @socketio.on("connect")
 def on_connect(auth):
@@ -255,18 +241,9 @@ def handle_message(data):
     user_message_times[current_user] = timestamps
 
     # Process the message if within limit
-    # cleaned_message = sanitize_input(data.get("data", ""))
-    # formatted_message = format_message(cleaned_message)
     raw_message = data.get("data", "")
     formatted_message = format_message(raw_message)
 
-    # content = {"name": current_user, "message": formatted_message}
-    # send(content, to=room)
-    # conversations[room].append(content)
-    # … after formatting …
-    # timestamp = time.strftime('%H:%M:%S')  # or '%Y-%m-%d %H:%M:%S' if you want date also
-    # timestamp = time.strftime('%I:%M:%S %p').lstrip('0')
-    # Prefer client-sent timestamp if provided; otherwise fall back to a server timestamp
     timestamp = data.get("timestamp")
     if not timestamp:
         # server fallback (optional)
@@ -298,24 +275,6 @@ def handle_typing(data):
         "typing": data["typing"]
     }, to=room)
 
-
-
-
-
-# @socketio.on("disconnect")
-# def on_disconnect():
-#     if "username" not in session or "current_partner" not in session:
-#         return
-#     current_user = session["username"]
-#     partner = session["current_partner"]
-#     room = get_dm_room(current_user, partner)
-#     leave_room(room)
-#     # send({"name": current_user, "message": "has left the chat."}, to=room)
-#     print(f"{current_user} left DM room {room}")
-
-#     if current_user in online_users:
-#         online_users.remove(current_user)
-#         socketio.emit("status_update", {"user": current_user, "online": False})
 
 @socketio.on("disconnect")
 def on_disconnect():
@@ -376,16 +335,6 @@ def download_file(filename):
     except Exception as e:
         return f"Error downloading file: {str(e)}", 500
 
-
-# @app.route("/download/<filename>")
-# def download_file(filename):
-#     file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-#     with open(file_path, "rb") as f:
-#         decrypted_data = cipher.decrypt(f.read())
-#     decrypted_file_path = os.path.join(app.config["UPLOAD_FOLDER"], f"decrypted_{filename}")
-#     with open(decrypted_file_path, "wb") as decrypted_file:
-#         decrypted_file.write(decrypted_data)
-#     return send_from_directory(app.config["UPLOAD_FOLDER"], f"decrypted_{filename}")
 
 
 # AES-256 Encryption Setup
