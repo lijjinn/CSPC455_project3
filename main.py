@@ -1,7 +1,8 @@
-from flask import Flask, render_template, request, session, redirect, url_for, send_from_directory, jsonify
+from flask import Flask, render_template, request, session, redirect, url_for, send_from_directory, jsonify, send_file
 from werkzeug.utils import secure_filename
 from flask_socketio import join_room, leave_room, send, SocketIO
 from cryptography.fernet import Fernet
+from io import BytesIO
 import os
 import random
 import time
@@ -28,7 +29,7 @@ def sanitize_input(text):
 
 # In-memory user store (username: {password: hashed})
 users = {}
-
+online_users = set()
 
 
 conversations = defaultdict(list)
@@ -152,7 +153,16 @@ def home():
             return redirect(url_for("chat", partner=new_partner))
     # Get list of conversation partners for the current user.
     conversations_list = sorted(list(user_conversations[current_user]))
-    return render_template("home.html", error=error, conversations=conversations_list, current_user=current_user)
+    # return render_template("home.html", error=error, conversations=conversations_list, current_user=current_user)
+
+    # also pass the list of online users
+    return render_template(
+        "home.html",
+        error=error,
+        conversations=conversations_list,
+        current_user=current_user,
+        online_users=list(online_users)
+    )
 
 
 @app.route("/chat/<partner>", methods=["GET"])
@@ -173,19 +183,51 @@ def chat(partner):
     messages = conversations[room]
     # Save the current chat partner in session (for use in socket events)
     session["current_partner"] = partner
-    return render_template("chat.html", partner=partner, room=room, messages=messages, current_user=current_user)
+    # return render_template("chat.html", partner=partner, room=room, messages=messages, current_user=current_user)
 
+    return render_template(
+        "chat.html",
+        partner=partner,
+        room=room,
+        messages=messages,
+        current_user=current_user,
+        online_users=list(online_users)
+    )
+
+# @socketio.on("connect")
+# def on_connect(auth):
+#     if "username" not in session or "current_partner" not in session:
+#         return
+#     current_user = session["username"]
+#     partner = session["current_partner"]
+#     room = get_dm_room(current_user, partner)
+#     join_room(room)
+#     # send({"name": current_user, "message": "has entered the chat."}, to=room)
+#     print(f"{current_user} joined DM room {room}")
+
+#     if current_user not in online_users:
+#         online_users.add(current_user)
+#         socketio.emit("status_update", {"user": current_user, "online": True})
 
 @socketio.on("connect")
 def on_connect(auth):
-    if "username" not in session or "current_partner" not in session:
+    # if they’re not logged in, ignore
+    if "username" not in session:
         return
     current_user = session["username"]
-    partner = session["current_partner"]
-    room = get_dm_room(current_user, partner)
-    join_room(room)
-    send({"name": current_user, "message": "has entered the chat."}, to=room)
-    print(f"{current_user} joined DM room {room}")
+
+    # 1) Global presence
+    if current_user not in online_users:
+        online_users.add(current_user)
+        socketio.emit("status_update", {"user": current_user, "online": True})
+
+    # 2) If they navigated into a DM, also join that room
+    if "current_partner" in session:
+        partner = session["current_partner"]
+        room = get_dm_room(current_user, partner)
+        join_room(room)
+        # send({"name": current_user, "message": "has entered the chat."}, to=room)
+        print(f"{current_user} joined DM room {room}")
 
 @socketio.on("message")
 def handle_message(data):
@@ -213,9 +255,27 @@ def handle_message(data):
     user_message_times[current_user] = timestamps
 
     # Process the message if within limit
-    cleaned_message = sanitize_input(data.get("data", ""))
-    formatted_message = format_message(cleaned_message)
-    content = {"name": current_user, "message": formatted_message}
+    # cleaned_message = sanitize_input(data.get("data", ""))
+    # formatted_message = format_message(cleaned_message)
+    raw_message = data.get("data", "")
+    formatted_message = format_message(raw_message)
+
+    # content = {"name": current_user, "message": formatted_message}
+    # send(content, to=room)
+    # conversations[room].append(content)
+    # … after formatting …
+    # timestamp = time.strftime('%H:%M:%S')  # or '%Y-%m-%d %H:%M:%S' if you want date also
+    # timestamp = time.strftime('%I:%M:%S %p').lstrip('0')
+    # Prefer client-sent timestamp if provided; otherwise fall back to a server timestamp
+    timestamp = data.get("timestamp")
+    if not timestamp:
+        # server fallback (optional)
+        timestamp = time.strftime('%I:%M:%S %p').lstrip('0')
+    content = {
+        "name": current_user,
+        "message": formatted_message,
+        "timestamp": timestamp
+    }
     send(content, to=room)
     conversations[room].append(content)
 
@@ -242,17 +302,40 @@ def handle_typing(data):
 
 
 
+# @socketio.on("disconnect")
+# def on_disconnect():
+#     if "username" not in session or "current_partner" not in session:
+#         return
+#     current_user = session["username"]
+#     partner = session["current_partner"]
+#     room = get_dm_room(current_user, partner)
+#     leave_room(room)
+#     # send({"name": current_user, "message": "has left the chat."}, to=room)
+#     print(f"{current_user} left DM room {room}")
+
+#     if current_user in online_users:
+#         online_users.remove(current_user)
+#         socketio.emit("status_update", {"user": current_user, "online": False})
+
 @socketio.on("disconnect")
 def on_disconnect():
-    if "username" not in session or "current_partner" not in session:
+    # if they’re not logged in, nothing to do
+    if "username" not in session:
         return
     current_user = session["username"]
-    partner = session["current_partner"]
-    room = get_dm_room(current_user, partner)
-    leave_room(room)
-    send({"name": current_user, "message": "has left the chat."}, to=room)
-    print(f"{current_user} left DM room {room}")
 
+    # 1) If they were in a DM, leave that room
+    if "current_partner" in session:
+        partner = session["current_partner"]
+        room = get_dm_room(current_user, partner)
+        leave_room(room)
+        # send({"name": current_user, "message": "has left the chat."}, to=room)
+        print(f"{current_user} left DM room {room}")
+
+    # 2) Global presence off
+    if current_user in online_users:
+        online_users.remove(current_user)
+        socketio.emit("status_update", {"user": current_user, "online": False})
 
 @app.route("/upload", methods=["POST"])
 def upload_file():
@@ -269,15 +352,40 @@ def upload_file():
     file_url = f"/download/{filename}"
     return jsonify({"success": True, "file_url": file_url, "file_name": filename})
 
+
 @app.route("/download/<filename>")
 def download_file(filename):
+    if "username" not in session:
+        return "Unauthorized", 403
+
     file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-    with open(file_path, "rb") as f:
-        decrypted_data = cipher.decrypt(f.read())
-    decrypted_file_path = os.path.join(app.config["UPLOAD_FOLDER"], f"decrypted_{filename}")
-    with open(decrypted_file_path, "wb") as decrypted_file:
-        decrypted_file.write(decrypted_data)
-    return send_from_directory(app.config["UPLOAD_FOLDER"], f"decrypted_{filename}")
+
+    if not os.path.exists(file_path):
+        return "File not found", 404
+
+    try:
+        with open(file_path, "rb") as f:
+            encrypted_data = f.read()
+        decrypted_data = cipher.decrypt(encrypted_data)
+
+        return send_file(
+            BytesIO(decrypted_data),
+            download_name=filename,
+            as_attachment=True
+        )
+    except Exception as e:
+        return f"Error downloading file: {str(e)}", 500
+
+
+# @app.route("/download/<filename>")
+# def download_file(filename):
+#     file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+#     with open(file_path, "rb") as f:
+#         decrypted_data = cipher.decrypt(f.read())
+#     decrypted_file_path = os.path.join(app.config["UPLOAD_FOLDER"], f"decrypted_{filename}")
+#     with open(decrypted_file_path, "wb") as decrypted_file:
+#         decrypted_file.write(decrypted_data)
+#     return send_from_directory(app.config["UPLOAD_FOLDER"], f"decrypted_{filename}")
 
 
 # AES-256 Encryption Setup
