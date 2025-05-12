@@ -9,7 +9,6 @@ Welcome to the Real-Time DM Chat Application! This secure messaging platform all
 * **Instant messaging** – Messages are delivered in real time.
 * **One-on-one conversations** – Users can initiate direct conversations for personal messaging.
 * **User-friendly interface** – Simple and intuitive chat layout.
-* **Connection notifications** – Get notified when a user joins or leaves a chat room.
 * **Online/Offline Status** – See when your contacts are active or offline for better communication awareness.
 * **WebSocket communication** – Real-time message updates by Flask-SocketIO.
 * **Secure file sharing** – Encrypted file transfers using AES-256 encryption for enhanced security.
